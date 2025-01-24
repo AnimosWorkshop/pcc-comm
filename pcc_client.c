@@ -12,7 +12,7 @@ int main(int argc, char **argv) {
     struct sockaddr_in serv_addr, my_addr, peer_addr;
     socklen_t addrsize = sizeof(struct sockaddr_in);
     int file_fd, sock_fd;
-    u_int32_t fsize, written, written_cur, in_buff, from_buff, response;
+    u_int32_t fsize, written, written_cur, in_buff, from_buff, pcc_count;
     char buff[MB];
 
     if (argc != 4) {
@@ -20,9 +20,10 @@ int main(int argc, char **argv) {
         return -EINVAL;
     }
     
+    memset(&serv_addr, 0, addrsize);
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = inet_addr(argv[1]);
-    serv_addr.sin_port = ntohs(atoi(argv[2]));
+    serv_addr.sin_port = htons(atoi(argv[2]));
     file_fd = open(argv[3], O_RDONLY);
 
     if (file_fd < 0) {
@@ -30,13 +31,13 @@ int main(int argc, char **argv) {
         return -ENOENT;
     }
     fsize = lseek(file_fd, 0, SEEK_END);
-    sprintf(buff, "%lu", hton(fsize));
+    sprintf(buff, "%lu", htonl(fsize));
     lseek(file_fd, 0, SEEK_SET);
 
     // Create socket
     if ((sock_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        fprintf(stderr, "Could not create socket.\n");
-        return -EINVAL;
+        fprintf(stderr, "Could not create socket. %s\n", strerror(errno));
+        return -errno;
     }
 
     // Connect
@@ -47,6 +48,8 @@ int main(int argc, char **argv) {
 
     getsockname(sock_fd, (struct sockaddr *)&my_addr, &addrsize);
     getpeername(sock_fd, (struct sockaddr *)&peer_addr, &addrsize);
+
+    memset(buff, 0, MB * sizeof(char));
 
     // Send file size
     written = 0;
@@ -62,15 +65,14 @@ int main(int argc, char **argv) {
     // Send file data
     written = 0;
     while (written < fsize) {
-        written_cur = read(file_fd, buff, sizeof(buff));
-        if (written_cur < 0) {
+        in_buff = read(file_fd, buff, sizeof(buff));
+        if (in_buff < 0) {
             fprintf(stderr, strerror(errno));
             return errno;
         }
-        in_buff = written_cur;
         from_buff = 0;
         while (from_buff < in_buff) {
-            written_cur = write(sock_fd, buff, sizeof(fsize) - written);
+            written_cur = write(sock_fd, buff + from_buff, in_buff - from_buff);
             if (written_cur < 0) {
                 fprintf(stderr, strerror(errno));
                 return errno;
@@ -79,10 +81,10 @@ int main(int argc, char **argv) {
         }
     }
 
-    // Read response
+    // Receive response
     written = 0;
-    while (written < sizeof(response)) {
-        written_cur = read(sock_fd, buff, sizeof(response) - written);
+    while (written < sizeof(pcc_count)) {
+        written_cur = read(sock_fd, buff, sizeof(pcc_count) - written);
         if (written_cur < 0) {
             fprintf(stderr, strerror(errno));
             return errno;
@@ -90,8 +92,10 @@ int main(int argc, char **argv) {
         written += written_cur;
     }
     buff[written] = '\0';
-    response = ntohi(strtoul(buff, NULL, 0));
+    pcc_count = ntohi(strtoul(buff, NULL, 0));
     printf("# of printable characters: %u\n");
+
+    close(sock_fd);
 
     return 0;
 }
