@@ -1,9 +1,13 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <stdbool.h>
+#include <signal.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 #define MB (1024 * 1024)
 
@@ -27,11 +31,11 @@ int main(int argc, char **argv) {
     file_fd = open(argv[3], O_RDONLY);
 
     if (file_fd < 0) {
-        fprintf(stderr, strerror(ENOENT), argv[3]);
+        fprintf(stderr, "%s\n", strerror(ENOENT));
         return -ENOENT;
     }
     fsize = lseek(file_fd, 0, SEEK_END);
-    sprintf(buff, "%lu", htonl(fsize));
+    sprintf(buff, "%u", htonl(fsize));
     lseek(file_fd, 0, SEEK_SET);
 
     // Create socket
@@ -42,7 +46,7 @@ int main(int argc, char **argv) {
 
     // Connect
     if (connect(sock_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        fprintf(stderr, strerror(ETIMEDOUT));
+        fprintf(stderr, "%s\n", strerror(ETIMEDOUT));
         return -ETIMEDOUT;
     }
 
@@ -56,7 +60,7 @@ int main(int argc, char **argv) {
     while (written < sizeof(fsize)) {
         written_cur = write(sock_fd, buff, sizeof(fsize) - written);
         if (written_cur < 0) {
-            fprintf(stderr, strerror(errno));
+            fprintf(stderr, "%s\n", strerror(errno));
             return errno;
         }
         written += written_cur;
@@ -67,14 +71,14 @@ int main(int argc, char **argv) {
     while (written < fsize) {
         in_buff = read(file_fd, buff, sizeof(buff));
         if (in_buff < 0) {
-            fprintf(stderr, strerror(errno));
+            fprintf(stderr, "%s\n", strerror(errno));
             return errno;
         }
         from_buff = 0;
         while (from_buff < in_buff) {
             written_cur = write(sock_fd, buff + from_buff, in_buff - from_buff);
             if (written_cur < 0) {
-                fprintf(stderr, strerror(errno));
+                fprintf(stderr, "%s\n", strerror(errno));
                 return errno;
             }
             from_buff += written_cur;
@@ -86,14 +90,14 @@ int main(int argc, char **argv) {
     while (written < sizeof(pcc_count)) {
         written_cur = read(sock_fd, buff, sizeof(pcc_count) - written);
         if (written_cur < 0) {
-            fprintf(stderr, strerror(errno));
+            fprintf(stderr, "%s\n", strerror(errno));
             return errno;
         }
         written += written_cur;
     }
     buff[written] = '\0';
-    pcc_count = ntohi(strtoul(buff, NULL, 0));
-    printf("# of printable characters: %u\n");
+    pcc_count = ntohl(strtoul(buff, NULL, 0));
+    printf("# of printable characters: %u\n", pcc_count);
 
     close(sock_fd);
 
