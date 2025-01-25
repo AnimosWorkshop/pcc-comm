@@ -19,6 +19,8 @@ int main(int argc, char **argv) {
     u_int32_t fsize, written, written_cur, in_buff, from_buff, pcc_count;
     char buff[MB];
 
+    memset(buff, 0, MB * sizeof(char));
+
     if (argc != 4) {
         fprintf(stderr, "Argument count should be 4, entered %d.\n", argc);
         return -EINVAL;
@@ -36,6 +38,7 @@ int main(int argc, char **argv) {
     }
     fsize = lseek(file_fd, 0, SEEK_END);
     sprintf(buff, "%u", htonl(fsize));
+    buff[10] = '\0';
     lseek(file_fd, 0, SEEK_SET);
 
     // Create socket
@@ -43,54 +46,71 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Could not create socket. %s\n", strerror(errno));
         return -errno;
     }
+    getsockname(sock_fd, (struct sockaddr *)&my_addr, &addrsize);
 
+    printf("Socket created at %s:%u\n", inet_ntoa(my_addr.sin_addr), ntohs(my_addr.sin_port));
+    printf("Trying to connect to %s:%u\n", inet_ntoa(serv_addr.sin_addr), ntohs(serv_addr.sin_port));
+    
     // Connect
     if (connect(sock_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        fprintf(stderr, "%s\n", strerror(ETIMEDOUT));
+        fprintf(stderr, "Connection error. %s\n", strerror(ETIMEDOUT));
+        close(sock_fd);
         return -ETIMEDOUT;
     }
+
+    printf("Connected successfully.\n");
 
     getsockname(sock_fd, (struct sockaddr *)&my_addr, &addrsize);
     getpeername(sock_fd, (struct sockaddr *)&peer_addr, &addrsize);
 
-    memset(buff, 0, MB * sizeof(char));
-
     // Send file size
+    printf("Sending file size %u.\n", fsize);
     written = 0;
-    while (written < sizeof(fsize)) {
-        written_cur = write(sock_fd, buff, sizeof(fsize) - written);
+    while (written < 10) {
+        written_cur = write(sock_fd, buff, 10 - written);
         if (written_cur < 0) {
             fprintf(stderr, "%s\n", strerror(errno));
+            close(sock_fd);
             return errno;
         }
         written += written_cur;
     }
 
+    memset(buff, 0, MB * sizeof(char));
+
     // Send file data
-    written = 0;
-    while (written < fsize) {
+    printf("Sending file data.\n");
+    in_buff = 0;
+    while (in_buff < fsize) {
         in_buff = read(file_fd, buff, sizeof(buff));
+        printf("in_buff %u\n", in_buff);
         if (in_buff < 0) {
             fprintf(stderr, "%s\n", strerror(errno));
+            close(sock_fd);
             return errno;
         }
         from_buff = 0;
         while (from_buff < in_buff) {
             written_cur = write(sock_fd, buff + from_buff, in_buff - from_buff);
+            printf("written_cur %u\n", written_cur);
             if (written_cur < 0) {
                 fprintf(stderr, "%s\n", strerror(errno));
+                close(sock_fd);
                 return errno;
             }
             from_buff += written_cur;
+            printf("from_buff %u\n", from_buff);
         }
     }
 
     // Receive response
+    printf("Awaiting response.\n");
     written = 0;
-    while (written < sizeof(pcc_count)) {
-        written_cur = read(sock_fd, buff, sizeof(pcc_count) - written);
+    while (written < 10) {
+        written_cur = read(sock_fd, buff, 10 - written);
         if (written_cur < 0) {
             fprintf(stderr, "%s\n", strerror(errno));
+            close(sock_fd);
             return errno;
         }
         written += written_cur;
