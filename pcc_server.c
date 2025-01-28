@@ -36,6 +36,7 @@ int main(int argc, char **argv) {
     char buff[MB];
     int i, reuse = 1;
 
+    // Check argument number
     if (argc != 2) {
         fprintf(stderr, "Argument count should be 2, entered %d.\n", argc);
         return -EINVAL;
@@ -43,6 +44,7 @@ int main(int argc, char **argv) {
 
     signal(SIGINT, handle_sigint); 
 
+    // Create socket and define as reusable
     if ((listen_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         fprintf(stderr, "Could not create socket. %s\n", strerror(errno));
         return -errno;
@@ -52,28 +54,23 @@ int main(int argc, char **argv) {
         return -errno;
     }
     
+    // Establish server address
     memset(&serv_addr, 0, addrsize);
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     serv_addr.sin_port = htons(atoi(argv[1]));
-
-    printf("Socket %d created at %s:%u\n", listen_fd, inet_ntoa(serv_addr.sin_addr), ntohs(serv_addr.sin_port));
-    
+  
     if (bind(listen_fd, (struct sockaddr *)&serv_addr, addrsize)) {
         fprintf(stderr, "Bind failed. %s\n", strerror(errno));
         close(listen_fd);
         return -errno;
     }
 
-    printf("Bound.\n");
-
     if (listen(listen_fd, 10)) {
         fprintf(stderr, "Listen failed. %s\n", strerror(errno));
         close(listen_fd);
         return -errno;
     }
-
-    printf("Listening.\n");
 
     while (1) {
         printf("Now attempting to connect.\n");
@@ -83,13 +80,13 @@ int main(int argc, char **argv) {
             close(listen_fd);
             return -errno;
         }
-        printf("Connection successful.\n");
 
         handling = true;
 
         getsockname(conn_fd, (struct sockaddr *)&my_addr, &addrsize);
         getpeername(conn_fd, (struct sockaddr *)&peer_addr, &addrsize);
 
+        // Reset PCC count for current client
         for (i = 0; i <= PCC_END - PCC_SET; i++) {
             pcc_cur[i] = 0;
         }
@@ -108,14 +105,11 @@ int main(int argc, char **argv) {
                 return errno;
             }
             written += written_cur;
-            printf("Already read %u bytes.\n", written);
         }
         buff[written] = '\0';
         fsize = ntohl(strtoul(buff, NULL, 0));
-        printf("File size received %u.\n", fsize);
 
         // Receive file data
-        printf("Awaiting file data.\n");
         written = 0;
         while (written < fsize) {
             in_buff = read(conn_fd, buff, sizeof(buff));
@@ -132,11 +126,9 @@ int main(int argc, char **argv) {
                 }
             }
             written += in_buff;
-            printf("Already read %u bytes.\n", written);
         }
 
         // Send response
-        printf("Sending response %u.\n", pcc_count);
         sprintf(buff, "%u", htonl(pcc_count));
         buff[sizeof(pcc_cur)] = '\0';
         written = 0;
@@ -158,9 +150,13 @@ int main(int argc, char **argv) {
 
         // Print PCC if signal caught
         if (pending_sig) {
+            // Prevent interrupt during interrupt
+            pending_sig = false;
+
             for (i = 0; i <= PCC_END - PCC_SET; i++) {
                 printf("char '%c' : %u times\n", (char)(i + PCC_SET), pcc_total[i]);
             }
+
             close(conn_fd);
             close(listen_fd);
             exit(SIGINT);
